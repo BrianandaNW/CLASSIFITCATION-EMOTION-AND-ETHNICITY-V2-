@@ -21,9 +21,6 @@ tf.get_logger().setLevel(logging.ERROR)
 EMOTION_MODEL_URL = "https://drive.google.com/uc?export=download&id=165xIiid5rsRIT3n8X5NfTi73B3OL2YhL"
 ETHNICITY_MODEL_URL = "https://drive.google.com/uc?export=download&id=1URsi1OFfjUIaLI33GI7LSNrLJzygXn63"
 
-EMOTION_MODEL_FILE = "modelensembleemosi.joblib"
-ETHNICITY_MODEL_FILE = "modeletnisrf.joblib"
-
 # Label mapping
 EMOTION_LABELS = {0: 'fear', 1: 'surprised', 2: 'angry', 3: 'sad', 4: 'disgusted', 5: 'happy'}
 ETHNICITY_LABELS = {0: 'Ambon (A)', 1: 'Toraja (T)', 2: 'Kaukasia (K)', 3: 'Jepang (J)'}
@@ -505,4 +502,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
