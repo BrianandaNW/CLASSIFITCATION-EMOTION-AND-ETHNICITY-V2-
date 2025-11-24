@@ -1,4 +1,4 @@
-# realtime_classifier.py
+# appfereth.py (KODE YANG SUDAH DIESUAIKAN UNTUK DEPLOYMENT STREAMLIT)
 
 import cv2
 import numpy as np
@@ -7,14 +7,19 @@ import mediapipe as mp
 import tensorflow as tf
 from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2, preprocess_input
 from tensorflow.keras.preprocessing.image import img_to_array
-from sklearn.pipeline import Pipeline # Penting untuk memuat model Pipeline joblib
+from sklearn.pipeline import Pipeline
+import streamlit as st
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
+import logging
 
-# ===================== CONFIG MODEL & LABEL =====================
+# Konfigurasi logger untuk menekan spam TensorFlow
+tf.get_logger().setLevel(logging.ERROR)
 
-# MODEL EMOSI BARU (Geometri Lama + Tekstur)
-EMOTION_MODEL_URL = "https://drive.google.com/uc?export=download&id=165xIiid5rsRIT3n8X5NfTi73B3OL2YhL"
-# MODEL ETNISITAS BARU (Geometri BARU + Tekstur)
-ETHNICITY_MODEL_URL = "https://drive.google.com/uc?export=download&id=1URsi1OFfjUIaLI33GI7LSNrLJzygXn63"
+# ===================== CONFIG MODEL & LABEL (TIDAK BERUBAH) =====================
+
+# URL ASLI MUNGKIN MEMERLUKAN DOWNLOAD JIKA FILE TIDAK ADA
+# EMOTION_MODEL_URL = "https://drive.google.com/uc?export=download&id=165xIiid5rsRIT3n8X5NfTi73B3OL2YhL"
+# ETHNICITY_MODEL_URL = "https://drive.google.com/uc?export=download&id=1URsi1OFfjUIaLI33GI7LSNrLJzygXn63"
 
 EMOTION_MODEL_FILE = "modelensembleemosi.joblib"
 ETHNICITY_MODEL_FILE = "modeletnisrf.joblib"
@@ -28,58 +33,56 @@ CNN_INPUT_SIZE = (160, 160)
 CNN_POOLING = 'avg'
 CNN_LAYER_TRAINABLE = False
 
-# ===================== LOAD MODEL & EMBEDDER =====================
+# ===================== LOAD MODEL & EMBEDDER (TIDAK BERUBAH) =====================
+
+# Membuat instance CNN Embedder di lingkup global/sebelum transformer
+class CNNEmbedder:
+    def __init__(self, input_size=CNN_INPUT_SIZE, pooling=CNN_POOLING, trainable=CNN_LAYER_TRAINABLE):
+        self.input_size = input_size
+        # Muat model dasar MobileNetV2 satu kali
+        base = MobileNetV2(include_top=False, weights='imagenet', input_shape=(input_size[0], input_size[1], 3), pooling=pooling)
+        base.trainable = trainable
+        self.model = base
+
+    # Memproses BGR image
+    def compute(self, img_bgr):
+        if img_bgr is None or img_bgr.size == 0:
+             return np.zeros((1280,)) 
+             
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        img_resized = cv2.resize(img_rgb, self.input_size, interpolation=cv2.INTER_AREA)
+        arr = img_to_array(img_resized)
+        arr = np.expand_dims(arr, axis=0)
+        arr = preprocess_input(arr)
+        # Gunakan tf.convert_to_tensor untuk menghindari masalah dengan MobileNetV2.predict
+        emb = self.model.predict(tf.convert_to_tensor(arr), verbose=0) 
+        return emb.flatten()
 
 try:
     # Memuat Model Pipeline
     en_emotion_model = joblib.load(EMOTION_MODEL_FILE)
     rf_ethnicity_model = joblib.load(ETHNICITY_MODEL_FILE)
-    print(f"✅ Model Emosi: {EMOTION_MODEL_FILE} berhasil dimuat. (Fitur: Geom Lama + Tekstur)")
-    print(f"✅ Model Etnisitas: {ETHNICITY_MODEL_FILE} berhasil dimuat. (Fitur: Geom BARU + Tekstur)")
-
-    # Membuat instance CNN Embedder
-    class CNNEmbedder:
-        def __init__(self, input_size=CNN_INPUT_SIZE, pooling=CNN_POOLING, trainable=CNN_LAYER_TRAINABLE):
-            self.input_size = input_size
-            base = MobileNetV2(include_top=False, weights='imagenet', input_shape=(input_size[0], input_size[1], 3), pooling=pooling)
-            base.trainable = trainable
-            self.model = base
-
-        def compute(self, img_bgr):
-            if img_bgr is None or img_bgr.size == 0:
-                 return np.zeros((1280,)) 
-                    
-            img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-            img_resized = cv2.resize(img_rgb, self.input_size, interpolation=cv2.INTER_AREA)
-            arr = img_to_array(img_resized)
-            arr = np.expand_dims(arr, axis=0)
-            arr = preprocess_input(arr)
-            emb = self.model.predict(arr, verbose=0)
-            return emb.flatten()
-
+    st.sidebar.success(f"✅ Model Emosi & Etnisitas berhasil dimuat.")
     cnn_embedder = CNNEmbedder()
 
 except FileNotFoundError:
-    print(f"❌ ERROR: File model tidak ditemukan. Pastikan kedua file joblib berada di direktori yang sama.")
-    exit()
+    st.error(f"❌ ERROR: File model tidak ditemukan. Pastikan kedua file joblib ({EMOTION_MODEL_FILE}, {ETHNICITY_MODEL_FILE}) berada di direktori yang sama.")
+    st.stop()
 except Exception as e:
-    print(f"❌ ERROR saat memuat model atau CNN Embedder: {e}")
-    exit()
+    st.error(f"❌ ERROR saat memuat model atau CNN Embedder: {e}")
+    st.stop()
 
-# ===================== MEDIA PIPE & UTILITY FUNCTIONS (SHARED) =====================
+
+# ===================== MEDIA PIPE & UTILITY FUNCTIONS (TIDAK BERUBAH) =====================
 
 mp_face = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
 
-face_mesh = mp_face.FaceMesh(
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
-
 # --- REPLIKA UTAMA FUNGSI GEOMETRIS LAMA (UNTUK MODEL EMOSI) ---
+# ... (Semua fungsi extract_features_basic, extract_features_symmetry_ratio, extract_features_angles_areas, 
+# extract_class_specific_features, angle_between_old, triangle_area_old, dan build_feature_vector_emotion 
+# dari kode asli Anda dipertahankan di sini)
 
 def angle_between_old(p1, p2, p3): # Diubah namanya
     v1 = p1 - p2
@@ -94,7 +97,6 @@ def triangle_area_old(p1, p2, p3): # Diubah namanya
     area = 0.5 * np.linalg.norm(np.cross(v1, v2))
     return area
 
-# NOTE: Fungsi Geometris Lama (Basic, Symmetry, Angles, Class) tetap sama
 def extract_features_basic(lm):
     def dist(a, b): return np.linalg.norm(lm[a] - lm[b])
     feats = [
@@ -194,8 +196,10 @@ def build_feature_vector_emotion(lm_norm, cnn_emb=None):
     return np.concatenate(parts)
 
 # --- REPLIKA FUNGSI GEOMETRIS BARU (UNTUK MODEL ETNISITAS) ---
+# ... (Semua fungsi helper _distance, _angle, _slope, _curvature, _eye_aspect_ratio, 
+# _mouth_aspect_ratio, calculate_all_features_ethnicity, dan build_feature_vector_ethnicity 
+# dari kode asli Anda dipertahankan di sini)
 
-# Implementasi fungsi-fungsi helper baru (2D distance dan angle)
 def _distance(p1, p2):
     return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
 
@@ -228,10 +232,8 @@ def _mouth_aspect_ratio(landmarks):
     return v / (h + 1e-6)
 
 def calculate_all_features_ethnicity(landmarks):
-    # Dikerjakan di 2D (x, y) saja karena _distance, _angle, _slope, _curvature adalah 2D
     lm_2d = landmarks[:, :2] 
     
-    # Konfigurasi Index Landmark Baru (sesuai yang Anda berikan)
     FEAT_INDICES = {
         'LEFT_EYE': [33, 160, 158, 133, 153, 144], 
         'RIGHT_EYE': [362, 385, 387, 263, 373, 380],
@@ -313,7 +315,6 @@ def calculate_all_features_ethnicity(landmarks):
     features['jaw_angle_right'] = jaw_angle_right
 
     # 5. NOSE FEATURES
-    # Catatan: Indeks 98 dan 327 berada di dalam Face Mesh, digunakan untuk lebar hidung
     nose_width = _distance(lm_2d[98], lm_2d[327]) 
     features['nose_width'] = nose_width
     nose_height = _distance(lm_2d[168], lm_2d[2])
@@ -345,15 +346,13 @@ def calculate_all_features_ethnicity(landmarks):
 
 # FUNGSI UNTUK MODEL ETNISITAS (GEOMETRI BARU + TEKSTUR)
 def build_feature_vector_ethnicity(lm_raw_mp, cnn_emb=None):
-    # 1. Ekstrak Fitur Geometris BARU dari lm_raw_mp (normalized 0-1)
-    # Catatan: calculate_all_features_ethnicity bekerja dengan koordinat 0-1 (sudah dinormalisasi)
-    geom_features_dict = calculate_all_features_ethnicity(lm_raw_mp)
+    geom_features_dict = calculate_all_all_features_ethnicity(lm_raw_mp)
     geom_features_vector = np.array(list(geom_features_dict.values()))
     
-    parts = [geom_features_vector] # 50 fitur
+    parts = [geom_features_vector]
     
     if cnn_emb is not None:
-        parts.append(cnn_emb) # 1280 fitur
+        parts.append(cnn_emb)
     
     return np.concatenate(parts)
 
@@ -374,67 +373,60 @@ def crop_face_from_raw_landmarks(img_bgr, lm_raw, pad=0.2):
     return img_bgr[y1:y2, x1:x2], (x1, y1, x2, y2)
 
 
-# ===================== MAIN REAL-TIME LOOP =====================
+# ===================== KELAS VIDEO TRANSFORMER UNTUK WEBRTC =====================
 
-# Inisialisasi webcam
-cap = cv2.VideoCapture(0)
-if not cap.isOpened():
-    print("❌ ERROR: Tidak dapat membuka webcam. Periksa koneksi atau izin kamera.")
-    exit()
-
-print("\n--- Mulai Deteksi Real-Time (Tekan 'q' untuk Keluar) ---")
-
-is_streaming = False
-print("\nInstruksi: Tekan 'S' untuk memulai klasifikasi, atau 'Q' untuk keluar.")
-
-while cap.isOpened():
-    success, image = cap.read()
-    if not success:
-        print("Ignoring empty camera frame.")
-        continue
-
-    image = cv2.flip(image, 1)
-    
-    # Inisialisasi hasil di setiap frame untuk menghindari NameError pada tampilan
-    emotion_result = "Tidak Terdeteksi"
-    ethnicity_result = "Tidak Terdeteksi"
-    emo_confidence = 0.0
-    eth_confidence = 0.0
-    bbox_coords = None
-
-    # --- TAMPILAN AWAL (Kondisi is_streaming = False) ---
-    if not is_streaming:
-        h, w = image.shape[:2]
-        cv2.putText(image, "TEKAN 'S' UNTUK MEMULAI", (w // 4 - 30, h // 2), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 3, cv2.LINE_AA)
-        cv2.putText(image, "TEKAN 'Q' UNTUK KELUAR", (w // 4 - 30, h // 2 + 50), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3, cv2.LINE_AA)
-
-    # --- PEMROSESAN (Kondisi is_streaming = True) ---
-    else: # is_streaming is True
-        # Konversi warna HANYA di dalam blok ini
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(image_rgb)
+class RealTimeClassifier(VideoTransformerBase):
+    def __init__(self):
+        # Inisialisasi MediaPipe FaceMesh
+        self.face_mesh = mp_face.FaceMesh(
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        # Gunakan model global yang sudah dimuat di awal
+        self.en_emotion_model = en_emotion_model
+        self.rf_ethnicity_model = rf_ethnicity_model
+        self.cnn_embedder = cnn_embedder
         
-        # NOTE: Tidak perlu konversi kembali ke BGR di sini,
-        # karena image akan digunakan sebagai base untuk visualisasi di bawah.
+    # Fungsi utama yang dipanggil untuk setiap frame
+    def transform(self, frame):
+        # Frame dari webrtc_streamer datang sebagai VideoFrame (RGB), diubah menjadi array NumPy BGR untuk OpenCV
+        image = frame.to_ndarray(format="bgr24")
+        
+        # Balik gambar secara horizontal (seperti yang dilakukan di kode asli Anda)
+        image = cv2.flip(image, 1)
+        
+        # Konversi ke RGB untuk MediaPipe
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # Ukuran asli (digunakan untuk visualisasi BBOX)
+        h, w = image.shape[:2]
+        
+        results = self.face_mesh.process(image_rgb)
+        
+        emotion_result = "Tidak Terdeteksi"
+        ethnicity_result = "Tidak Terdeteksi"
+        emo_confidence = 0.0
+        eth_confidence = 0.0
+        bbox_coords = None
         
         if results.multi_face_landmarks:
             for face_landmarks in results.multi_face_landmarks:
                 
                 # --- 1. Ekstraksi Landmark Mentah dan Normalisasi ---
+                # Mengambil x, y, z dan menormalisasi (tetap dalam koordinat 0-1)
                 lm_raw_mp = np.array([[p.x, p.y, p.z] for p in face_landmarks.landmark])
                 lm_norm = lm_raw_mp.copy()
                 lm_norm = lm_norm - lm_norm.mean(axis=0)
                 lm_norm = lm_norm / (lm_norm.std(axis=0) + 1e-6)
 
                 # --- 2. Crop Wajah untuk CNN Embedding ---
-                # image yang digunakan di sini masih BGR (dari awal loop)
                 cropped_face, bbox_coords = crop_face_from_raw_landmarks(image, lm_raw_mp, pad=0.2)
                 x1, y1, x2, y2 = bbox_coords 
                 
                 # --- 3. Ekstraksi CNN Embedding (shared) ---
-                cnn_emb = cnn_embedder.compute(cropped_face)
+                cnn_emb = self.cnn_embedder.compute(cropped_face)
                 
                 # --- 4. Buat Vektor Fitur KHUSUS untuk SETIAP MODEL ---
                 feature_vector_emotion = build_feature_vector_emotion(lm_norm, cnn_emb)
@@ -444,26 +436,21 @@ while cap.isOpened():
                 
                 # --- 5. Prediksi ---
                 try:
-                    emo_proba = en_emotion_model.predict_proba(X_live_emo)[0]
+                    emo_proba = self.en_emotion_model.predict_proba(X_live_emo)[0]
                     emo_pred_idx = np.argmax(emo_proba)
                     emo_confidence = emo_proba[emo_pred_idx] * 100
                     emotion_result = EMOTION_LABELS.get(emo_pred_idx, "UNKNOWN EMO")
                     
-                    eth_proba = rf_ethnicity_model.predict_proba(X_live_eth)[0]
+                    eth_proba = self.rf_ethnicity_model.predict_proba(X_live_eth)[0]
                     eth_pred_idx = np.argmax(eth_proba)
                     eth_confidence = eth_proba[eth_pred_idx] * 100
                     ethnicity_result = ETHNICITY_LABELS.get(eth_pred_idx, "UNKNOWN ETH")
                 
-                except AttributeError as e:
-                    emotion_result = "Prediksi Gagal (No Proba)"
-                    ethnicity_result = "Prediksi Gagal (No Proba)"
-                    emo_confidence = 0.0
-                    eth_confidence = 0.0
-                    print(f"Error: {e}. Model mungkin tidak dilatih dengan probability=True.")
+                except AttributeError:
+                    emotion_result = "Prediksi Gagal"
+                    ethnicity_result = "Prediksi Gagal"
 
-                # --- 6. Visualisasi (Hanya terjadi jika is_streaming = True) ---
-                
-                # Gambar Landmark MediaPipe (menggunakan image BGR asli yang dimodifikasi di tempat)
+                # --- 6. Visualisasi (Di dalam loop face_landmarks) ---
                 mp_drawing.draw_landmarks(
                     image=image,
                     landmark_list=face_landmarks,
@@ -471,36 +458,50 @@ while cap.isOpened():
                     landmark_drawing_spec=None,
                     connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style())
             
-        # Visualisasi Bounding Box dan Teks (di luar loop face_landmarks, tetapi di dalam else/is_streaming)
-        if bbox_coords is not None:
-            x1, y1, x2, y2 = bbox_coords
-            cv2.rectangle(image, (x1, y1), (x2, y2), (255, 0, 0), 2)
-            
-            # Tampilkan hasil dengan confidence
-            text_emo = f"Emotion: {emotion_result} ({emo_confidence:.2f}%)"
-            text_eth = f"Ethnicity: {ethnicity_result} ({eth_confidence:.2f}%)"
-            
-            cv2.rectangle(image, (x1, y1 - 60), (x2, y1 - 30), (0, 0, 0), -1)
-            cv2.putText(image, text_emo, (x1 + 5, y1 - 35),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2, cv2.LINE_AA)
-            
-            cv2.rectangle(image, (x1, y1 - 30), (x2, y1), (0, 0, 0), -1)
-            cv2.putText(image, text_eth, (x1 + 5, y1 - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
+            # Visualisasi Bounding Box dan Teks (di luar loop face_landmarks)
+            if bbox_coords is not None:
+                x1, y1, x2, y2 = bbox_coords
+                cv2.rectangle(image, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                
+                # Tampilkan hasil dengan confidence
+                text_emo = f"Emotion: {emotion_result} ({emo_confidence:.2f}%)"
+                text_eth = f"Ethnicity: {ethnicity_result} ({eth_confidence:.2f}%)"
+                
+                cv2.rectangle(image, (x1, y1 - 60), (x2, y1 - 30), (0, 0, 0), -1)
+                cv2.putText(image, text_emo, (x1 + 5, y1 - 35),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2, cv2.LINE_AA)
+                
+                cv2.rectangle(image, (x1, y1 - 30), (x2, y1), (0, 0, 0), -1)
+                cv2.putText(image, text_eth, (x1 + 5, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
 
-    cv2.imshow('Face Classifier Real-Time', image)
-    
-    key = cv2.waitKey(5) & 0xFF
+        # Kembalikan frame yang sudah dimodifikasi (BGR)
+        return image
 
-    # Handler tombol 'S' dan 'Q'
-    if key == ord('s') or key == ord('S'):
-        is_streaming = True
-        print("➡️ Streaming dimulai. Deteksi wajah aktif.")
-    
-    if key == ord('q') or key == ord('Q'):
-        break
 
-# Bersihkan resources
-cap.release()
-cv2.destroyAllWindows()
-print("\n--- Selesai ---")
+# ===================== MAIN STREAMLIT APP =====================
+
+def main():
+    st.title("Klasifikasi Emosi & Etnisitas Wajah Real-Time")
+    st.markdown("""
+    Aplikasi ini menggunakan model Machine Learning (Ensemble & Random Forest) 
+    yang dikombinasikan dengan fitur Geometris MediaPipe FaceMesh dan **Texture/Embedding CNN (MobileNetV2)** untuk klasifikasi Emosi dan Etnisitas secara bersamaan.
+    """)
+    st.warning("⚠️ **PENTING:** Pastikan Anda memberikan izin akses kamera saat diminta oleh browser.")
+
+    # Implementasi webrtc_streamer
+    webrtc_streamer(
+        key="realtime-face-classifier",
+        mode=WebRtcMode.SENDRECV,
+        video_transformer_factory=RealTimeClassifier,
+        media_stream_constraints={"video": True, "audio": False},
+        async_transform=True,
+    )
+
+    st.sidebar.header("Detail Model")
+    st.sidebar.markdown(f"**Emosi:** {EMOTION_MODEL_FILE} (Geometri Lama + Tekstur)")
+    st.sidebar.markdown(f"**Etnisitas:** {ETHNICITY_MODEL_FILE} (Geometri BARU + Tekstur)")
+    st.sidebar.markdown(f"**CNN Embedder:** MobileNetV2 ({CNN_INPUT_SIZE})")
+
+if __name__ == "__main__":
+    main()
