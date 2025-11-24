@@ -18,8 +18,8 @@ tf.get_logger().setLevel(logging.ERROR)
 # ===================== CONFIG MODEL & LABEL (TIDAK BERUBAH) =====================
 
 # URL ASLI MUNGKIN MEMERLUKAN DOWNLOAD JIKA FILE TIDAK ADA
-# EMOTION_MODEL_URL = "https://drive.google.com/uc?export=download&id=165xIiid5rsRIT3n8X5NfTi73B3OL2YhL"
-# ETHNICITY_MODEL_URL = "https://drive.google.com/uc?export=download&id=1URsi1OFfjUIaLI33GI7LSNrLJzygXn63"
+EMOTION_MODEL_URL = "https://drive.google.com/uc?export=download&id=165xIiid5rsRIT3n8X5NfTi73B3OL2YhL"
+ETHNICITY_MODEL_URL = "https://drive.google.com/uc?export=download&id=1URsi1OFfjUIaLI33GI7LSNrLJzygXn63"
 
 EMOTION_MODEL_FILE = "modelensembleemosi.joblib"
 ETHNICITY_MODEL_FILE = "modeletnisrf.joblib"
@@ -505,3 +505,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
