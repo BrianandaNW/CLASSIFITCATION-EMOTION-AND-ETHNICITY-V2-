@@ -12,8 +12,11 @@ from sklearn.pipeline import Pipeline # Penting untuk memuat model Pipeline jobl
 # ===================== CONFIG MODEL & LABEL =====================
 
 # MODEL EMOSI BARU (Geometri Lama + Tekstur)
-EMOTION_MODEL_FILE = "modelensembleemosi.joblib"
+EMOTION_MODEL_URL = "https://drive.google.com/uc?export=download&id=165xIiid5rsRIT3n8X5NfTi73B3OL2YhL"
 # MODEL ETNISITAS BARU (Geometri BARU + Tekstur)
+ETHNICITY_MODEL_URL = "https://drive.google.com/uc?export=download&id=1URsi1OFfjUIaLI33GI7LSNrLJzygXn63"
+
+EMOTION_MODEL_FILE = "modelensembleemosi.joblib"
 ETHNICITY_MODEL_FILE = "modeletnisrf.joblib"
 
 # Label mapping
@@ -484,7 +487,6 @@ while cap.isOpened():
             cv2.rectangle(image, (x1, y1 - 30), (x2, y1), (0, 0, 0), -1)
             cv2.putText(image, text_eth, (x1 + 5, y1 - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
-            
 
     cv2.imshow('Face Classifier Real-Time', image)
     
