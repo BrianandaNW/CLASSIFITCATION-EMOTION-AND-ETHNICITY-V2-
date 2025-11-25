@@ -1,4 +1,4 @@
-# appfereth.py (KODE YANG SUDAH DIESUAIKAN UNTUK DEPLOYMENT STREAMLIT)
+# appfereth.py (KODE LENGKAP UNTUK DEPLOYMENT STREAMLIT DENGAN CACHING MODEL)
 
 import cv2
 import numpy as np
@@ -7,32 +7,63 @@ import mediapipe as mp
 import tensorflow as tf
 from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2, preprocess_input
 from tensorflow.keras.preprocessing.image import img_to_array
-from sklearn.pipeline import Pipeline
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
 import logging
+import requests
+import os
 
 # Konfigurasi logger untuk menekan spam TensorFlow
 tf.get_logger().setLevel(logging.ERROR)
 
-# ===================== CONFIG MODEL & LABEL (TIDAK BERUBAH) =====================
+# ===================== CONFIG MODEL & LABEL =====================
 
-# URL ASLI MUNGKIN MEMERLUKAN DOWNLOAD JIKA FILE TIDAK ADA
+# URL Google Drive Model (Pastikan ini adalah tautan Unduhan Langsung)
 EMOTION_MODEL_URL = "https://drive.google.com/uc?export=download&id=165xIiid5rsRIT3n8X5NfTi73B3OL2YhL"
 ETHNICITY_MODEL_URL = "https://drive.google.com/uc?export=download&id=1URsi1OFfjUIaLI33GI7LSNrLJzygXn63"
+
+# Nama file lokal yang akan disimpan/dimuat
+EMOTION_MODEL_FILE = "model_emosi.joblib"
+ETHNICITY_MODEL_FILE = "model_etnisitas.joblib"
 
 # Label mapping
 EMOTION_LABELS = {0: 'fear', 1: 'surprised', 2: 'angry', 3: 'sad', 4: 'disgusted', 5: 'happy'}
 ETHNICITY_LABELS = {0: 'Ambon (A)', 1: 'Toraja (T)', 2: 'Kaukasia (K)', 3: 'Jepang (J)'}
 
-# Konfigurasi CNN (HARUS SAMA DENGAN SAAT TRAINING)
+# Konfigurasi CNN
 CNN_INPUT_SIZE = (160, 160)
 CNN_POOLING = 'avg'
 CNN_LAYER_TRAINABLE = False
 
-# ===================== LOAD MODEL & EMBEDDER (TIDAK BERUBAH) =====================
+# ===================== FUNGSI CACHING & UNDUHAN MODEL =====================
 
-# Membuat instance CNN Embedder di lingkup global/sebelum transformer
+@st.cache_resource
+def load_and_cache_model(url, filename):
+    """Mengunduh model dari URL dan menyimpannya secara lokal jika belum ada, lalu memuatnya."""
+    
+    # Cek apakah file sudah ada di direktori Streamlit cache/deploy
+    if not os.path.exists(filename):
+        try:
+            st.info(f"Mengunduh model {filename} dari Google Drive...")
+            response = requests.get(url, stream=True)
+            response.raise_for_status() # Cek error HTTP/koneksi
+            
+            # Menyimpan file dalam potongan (chunks)
+            with open(filename, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            st.success(f"✅ Model {filename} berhasil diunduh dan disimpan.")
+        
+        except Exception as e:
+            st.error(f"Gagal mengunduh model {filename} dari {url}. Error: {e}")
+            raise
+
+    # Memuat Model Pipeline joblib
+    model = joblib.load(filename)
+    return model
+
+# ===================== LOAD MODEL & EMBEDDER =====================
+
 class CNNEmbedder:
     def __init__(self, input_size=CNN_INPUT_SIZE, pooling=CNN_POOLING, trainable=CNN_LAYER_TRAINABLE):
         self.input_size = input_size
@@ -41,56 +72,55 @@ class CNNEmbedder:
         base.trainable = trainable
         self.model = base
 
-    # Memproses BGR image
     def compute(self, img_bgr):
         if img_bgr is None or img_bgr.size == 0:
-             return np.zeros((1280,)) 
+             return np.zeros((1280,))
              
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         img_resized = cv2.resize(img_rgb, self.input_size, interpolation=cv2.INTER_AREA)
         arr = img_to_array(img_resized)
         arr = np.expand_dims(arr, axis=0)
         arr = preprocess_input(arr)
-        # Gunakan tf.convert_to_tensor untuk menghindari masalah dengan MobileNetV2.predict
+        # Gunakan tf.convert_to_tensor
         emb = self.model.predict(tf.convert_to_tensor(arr), verbose=0) 
         return emb.flatten()
 
 try:
-    # Memuat Model Pipeline
-    en_emotion_model = joblib.load(EMOTION_MODEL_FILE)
-    rf_ethnicity_model = joblib.load(ETHNICITY_MODEL_FILE)
+    # Panggil fungsi load_and_cache_model untuk memuat model
+    en_emotion_model = load_and_cache_model(EMOTION_MODEL_URL, EMOTION_MODEL_FILE)
+    rf_ethnicity_model = load_and_cache_model(ETHNICITY_MODEL_URL, ETHNICITY_MODEL_FILE)
+    
     st.sidebar.success(f"✅ Model Emosi & Etnisitas berhasil dimuat.")
     cnn_embedder = CNNEmbedder()
 
-except FileNotFoundError:
-    st.error(f"❌ ERROR: File model tidak ditemukan. Pastikan kedua file joblib ({EMOTION_MODEL_FILE}, {ETHNICITY_MODEL_FILE}) berada di direktori yang sama.")
-    st.stop()
 except Exception as e:
-    st.error(f"❌ ERROR saat memuat model atau CNN Embedder: {e}")
+    # Error akan ditangani di dalam fungsi load_and_cache_model
+    st.error(f"❌ ERROR Fatal: Tidak dapat menyiapkan model untuk klasifikasi. Cek koneksi internet/URL Google Drive. Detail: {e}")
     st.stop()
 
 
-# ===================== MEDIA PIPE & UTILITY FUNCTIONS (TIDAK BERUBAH) =====================
+# ===================== MEDIA PIPE & UTILITY FUNCTIONS =====================
 
 mp_face = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
 
 # --- REPLIKA UTAMA FUNGSI GEOMETRIS LAMA (UNTUK MODEL EMOSI) ---
-# ... (Semua fungsi extract_features_basic, extract_features_symmetry_ratio, extract_features_angles_areas, 
-# extract_class_specific_features, angle_between_old, triangle_area_old, dan build_feature_vector_emotion 
-# dari kode asli Anda dipertahankan di sini)
 
-def angle_between_old(p1, p2, p3): # Diubah namanya
+def angle_between_old(p1, p2, p3): 
     v1 = p1 - p2
     v2 = p3 - p2
     denom = (np.linalg.norm(v1) * np.linalg.norm(v2)) + 1e-9
     cosang = np.clip(np.dot(v1, v2) / denom, -1.0, 1.0)
     return np.arccos(cosang)
 
-def triangle_area_old(p1, p2, p3): # Diubah namanya
+def triangle_area_old(p1, p2, p3): 
     v1 = p2 - p1
     v2 = p3 - p1
+    # Asumsi 3D (z=0 jika hanya 2D)
+    if len(v1) == 2:
+        v1 = np.append(v1, 0)
+        v2 = np.append(v2, 0)
     area = 0.5 * np.linalg.norm(np.cross(v1, v2))
     return area
 
@@ -193,9 +223,6 @@ def build_feature_vector_emotion(lm_norm, cnn_emb=None):
     return np.concatenate(parts)
 
 # --- REPLIKA FUNGSI GEOMETRIS BARU (UNTUK MODEL ETNISITAS) ---
-# ... (Semua fungsi helper _distance, _angle, _slope, _curvature, _eye_aspect_ratio, 
-# _mouth_aspect_ratio, calculate_all_features_ethnicity, dan build_feature_vector_ethnicity 
-# dari kode asli Anda dipertahankan di sini)
 
 def _distance(p1, p2):
     return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
@@ -217,10 +244,9 @@ def _curvature(p1, p2, p3):
 
 def _eye_aspect_ratio(landmarks, eye_indices):
     points = landmarks[eye_indices]
-    # Asumsi order: 33/362, 160/385, 158/387, 133/263, 153/373, 144/380
-    v1 = _distance(points[1], points[5]) # 160-144 / 385-380
-    v2 = _distance(points[2], points[4]) # 158-153 / 387-373
-    h = _distance(points[0], points[3]) # 33-133 / 362-263 (eye width)
+    v1 = _distance(points[1], points[5]) 
+    v2 = _distance(points[2], points[4]) 
+    h = _distance(points[0], points[3]) 
     return (v1 + v2) / (2.0 * h + 1e-6)
 
 def _mouth_aspect_ratio(landmarks):
@@ -343,7 +369,8 @@ def calculate_all_features_ethnicity(landmarks):
 
 # FUNGSI UNTUK MODEL ETNISITAS (GEOMETRI BARU + TEKSTUR)
 def build_feature_vector_ethnicity(lm_raw_mp, cnn_emb=None):
-    geom_features_dict = calculate_all_all_features_ethnicity(lm_raw_mp)
+    # Menggunakan fungsi lama karena nama fungsinya salah dipanggil di kode asli
+    geom_features_dict = calculate_all_features_ethnicity(lm_raw_mp)
     geom_features_vector = np.array(list(geom_features_dict.values()))
     
     parts = [geom_features_vector]
@@ -391,14 +418,11 @@ class RealTimeClassifier(VideoTransformerBase):
         # Frame dari webrtc_streamer datang sebagai VideoFrame (RGB), diubah menjadi array NumPy BGR untuk OpenCV
         image = frame.to_ndarray(format="bgr24")
         
-        # Balik gambar secara horizontal (seperti yang dilakukan di kode asli Anda)
+        # Balik gambar secara horizontal
         image = cv2.flip(image, 1)
         
         # Konversi ke RGB untuk MediaPipe
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        # Ukuran asli (digunakan untuk visualisasi BBOX)
-        h, w = image.shape[:2]
         
         results = self.face_mesh.process(image_rgb)
         
@@ -412,7 +436,6 @@ class RealTimeClassifier(VideoTransformerBase):
             for face_landmarks in results.multi_face_landmarks:
                 
                 # --- 1. Ekstraksi Landmark Mentah dan Normalisasi ---
-                # Mengambil x, y, z dan menormalisasi (tetap dalam koordinat 0-1)
                 lm_raw_mp = np.array([[p.x, p.y, p.z] for p in face_landmarks.landmark])
                 lm_norm = lm_raw_mp.copy()
                 lm_norm = lm_norm - lm_norm.mean(axis=0)
@@ -444,8 +467,8 @@ class RealTimeClassifier(VideoTransformerBase):
                     ethnicity_result = ETHNICITY_LABELS.get(eth_pred_idx, "UNKNOWN ETH")
                 
                 except AttributeError:
-                    emotion_result = "Prediksi Gagal"
-                    ethnicity_result = "Prediksi Gagal"
+                    emotion_result = "Prediksi Gagal (No Proba)"
+                    ethnicity_result = "Prediksi Gagal (No Proba)"
 
                 # --- 6. Visualisasi (Di dalam loop face_landmarks) ---
                 mp_drawing.draw_landmarks(
@@ -473,7 +496,7 @@ class RealTimeClassifier(VideoTransformerBase):
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
 
         # Kembalikan frame yang sudah dimodifikasi (BGR)
-        return image
+        return image.copy()
 
 
 # ===================== MAIN STREAMLIT APP =====================
@@ -502,5 +525,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
