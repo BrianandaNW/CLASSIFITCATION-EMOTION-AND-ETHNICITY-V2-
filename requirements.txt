@@ -95,5 +95,6 @@ wrapt==2.0.1
 streamlit
 streamlit-webrtc
 requests
+xgboost
 
 
