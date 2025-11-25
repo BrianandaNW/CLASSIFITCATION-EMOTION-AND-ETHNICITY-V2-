@@ -1,4 +1,4 @@
-# appfereth.py (KODE LENGKAP UNTUK DEPLOYMENT STREAMLIT DENGAN CACHING MODEL)
+# appfereth.py (KODE LENGKAP UNTUK DEPLOYMENT STREAMLIT DENGAN CACHING SEMUA FILE BESAR)
 
 import cv2
 import numpy as np
@@ -22,9 +22,13 @@ tf.get_logger().setLevel(logging.ERROR)
 EMOTION_MODEL_URL = "https://drive.google.com/uc?export=download&id=165xIiid5rsRIT3n8X5NfTi73B3OL2YhL"
 ETHNICITY_MODEL_URL = "https://drive.google.com/uc?export=download&id=1URsi1OFfjUIaLI33GI7LSNrLJzygXn63"
 
+# URL MobileNetV2 Weights (ImageNet, no_top)
+MOBILE_NET_URL = "https://storage.googleapis.com/tensorflow/keras-applications/mobilenet_v2/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_160_no_top.h5"
+
 # Nama file lokal yang akan disimpan/dimuat
 EMOTION_MODEL_FILE = "modelensembleemosi.joblib"
 ETHNICITY_MODEL_FILE = "modeletnisrf.joblib"
+MOBILE_NET_FILE = "mobilenet_v2_weights.h5" 
 
 # Label mapping
 EMOTION_LABELS = {0: 'fear', 1: 'surprised', 2: 'angry', 3: 'sad', 4: 'disgusted', 5: 'happy'}
@@ -38,37 +42,45 @@ CNN_LAYER_TRAINABLE = False
 # ===================== FUNGSI CACHING & UNDUHAN MODEL =====================
 
 @st.cache_resource
-def load_and_cache_model(url, filename):
-    """Mengunduh model dari URL dan menyimpannya secara lokal jika belum ada, lalu memuatnya."""
-    
-    # Cek apakah file sudah ada di direktori Streamlit cache/deploy
+def cache_external_file(url, filename, display_name):
+    """Mengunduh file (weights/joblib) dari URL dan menyimpannya secara lokal jika belum ada."""
     if not os.path.exists(filename):
         try:
-            st.info(f"Mengunduh model {filename} dari Google Drive...")
+            st.info(f"Mengunduh {display_name} dari server...")
             response = requests.get(url, stream=True)
             response.raise_for_status() # Cek error HTTP/koneksi
             
-            # Menyimpan file dalam potongan (chunks)
             with open(filename, 'wb') as f:
+                # Menyimpan file dalam potongan (chunks)
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
-            st.success(f"✅ Model {filename} berhasil diunduh dan disimpan.")
+            st.success(f"✅ {display_name} berhasil diunduh dan disimpan.")
         
         except Exception as e:
-            st.error(f"Gagal mengunduh model {filename} dari {url}. Error: {e}")
+            st.error(f"Gagal mengunduh {display_name} dari {url}. Error: {e}")
             raise
+    return filename # Mengembalikan nama file lokal
 
-    # Memuat Model Pipeline joblib
-    model = joblib.load(filename)
-    return model
+# Fungsi terpisah untuk memuat Joblib (di luar cache resource agar tidak menimpa)
+def load_joblib_model(filename):
+    return joblib.load(filename)
+
 
 # ===================== LOAD MODEL & EMBEDDER =====================
 
 class CNNEmbedder:
-    def __init__(self, input_size=CNN_INPUT_SIZE, pooling=CNN_POOLING, trainable=CNN_LAYER_TRAINABLE):
+    # Menerima path_to_weights sebagai argumen
+    def __init__(self, path_to_weights, input_size=CNN_INPUT_SIZE, pooling=CNN_POOLING, trainable=CNN_LAYER_TRAINABLE):
         self.input_size = input_size
-        # Muat model dasar MobileNetV2 satu kali
-        base = MobileNetV2(include_top=False, weights='imagenet', input_shape=(input_size[0], input_size[1], 3), pooling=pooling)
+        
+        # Muat model dasar MobileNetV2 menggunakan path file lokal
+        base = MobileNetV2(
+            include_top=False, 
+            weights=path_to_weights, # Menggunakan path file lokal
+            input_shape=(input_size[0], input_size[1], 3), 
+            pooling=pooling
+        )
+        
         base.trainable = trainable
         self.model = base
 
@@ -86,16 +98,23 @@ class CNNEmbedder:
         return emb.flatten()
 
 try:
-    # Panggil fungsi load_and_cache_model untuk memuat model
-    en_emotion_model = load_and_cache_model(EMOTION_MODEL_URL, EMOTION_MODEL_FILE)
-    rf_ethnicity_model = load_and_cache_model(ETHNICITY_MODEL_URL, ETHNICITY_MODEL_FILE)
+    # 1. Cache weights MobileNetV2 (file H5)
+    weights_path = cache_external_file(MOBILE_NET_URL, MOBILE_NET_FILE, "MobileNetV2 Weights")
     
-    st.sidebar.success(f"✅ Model Emosi & Etnisitas berhasil dimuat.")
-    cnn_embedder = CNNEmbedder()
+    # 2. Cache dan Muat model Joblib (emosi dan etnisitas)
+    cache_external_file(EMOTION_MODEL_URL, EMOTION_MODEL_FILE, "Model Emosi")
+    en_emotion_model = load_joblib_model(EMOTION_MODEL_FILE)
+    
+    cache_external_file(ETHNICITY_MODEL_URL, ETHNICITY_MODEL_FILE, "Model Etnisitas")
+    rf_ethnicity_model = load_joblib_model(ETHNICITY_MODEL_FILE)
+    
+    # 3. Inisialisasi CNNEmbedder menggunakan path weights lokal
+    cnn_embedder = CNNEmbedder(path_to_weights=weights_path)
+
+    st.sidebar.success(f"✅ Semua model dan weights berhasil dimuat.")
 
 except Exception as e:
-    # Error akan ditangani di dalam fungsi load_and_cache_model
-    st.error(f"❌ ERROR Fatal: Tidak dapat menyiapkan model untuk klasifikasi. Cek koneksi internet/URL Google Drive. Detail: {e}")
+    st.error(f"❌ ERROR Fatal: Tidak dapat menyiapkan model untuk klasifikasi. Pastikan Anda telah menambahkan 'dill' dan 'xgboost' ke requirements.txt. Detail: {e}")
     st.stop()
 
 
@@ -117,7 +136,6 @@ def angle_between_old(p1, p2, p3):
 def triangle_area_old(p1, p2, p3): 
     v1 = p2 - p1
     v2 = p3 - p1
-    # Asumsi 3D (z=0 jika hanya 2D)
     if len(v1) == 2:
         v1 = np.append(v1, 0)
         v2 = np.append(v2, 0)
@@ -369,7 +387,6 @@ def calculate_all_features_ethnicity(landmarks):
 
 # FUNGSI UNTUK MODEL ETNISITAS (GEOMETRI BARU + TEKSTUR)
 def build_feature_vector_ethnicity(lm_raw_mp, cnn_emb=None):
-    # Menggunakan fungsi lama karena nama fungsinya salah dipanggil di kode asli
     geom_features_dict = calculate_all_features_ethnicity(lm_raw_mp)
     geom_features_vector = np.array(list(geom_features_dict.values()))
     
@@ -525,4 +542,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
