@@ -521,8 +521,8 @@ class RealTimeClassifier(VideoTransformerBase):
 def main():
     st.title("Klasifikasi Emosi & Etnisitas Wajah Real-Time")
     st.markdown("""
-    Aplikasi ini menggunakan model Machine Learning (Ensemble & Random Forest) 
-    yang dikombinasikan dengan fitur Geometris MediaPipe FaceMesh dan **Texture/Embedding CNN (MobileNetV2)** untuk klasifikasi Emosi dan Etnisitas secara bersamaan.
+    Deploy Model Machine Learning Berbasis Web ini menggunakan model ML (Random Forest, Support Vector Machine, XGBoost, Ensemble Voting Classifier) 
+    yang dikombinasikan dengan **Raw Landmarks &Geometric Features (MediaPipe FaceMesh)** dan **Texture/CCN Feature Embedder (MobileNetV2)** untuk klasifikasi Emosi dan Etnisitas secara bersamaan.
     """)
     st.warning("⚠️ **PENTING:** Pastikan Anda memberikan izin akses kamera saat diminta oleh browser.")
 
@@ -536,9 +536,10 @@ def main():
     )
 
     st.sidebar.header("Detail Model")
-    st.sidebar.markdown(f"**Emosi:** {EMOTION_MODEL_FILE} (Geometri Lama + Tekstur)")
-    st.sidebar.markdown(f"**Etnisitas:** {ETHNICITY_MODEL_FILE} (Geometri BARU + Tekstur)")
+    st.sidebar.markdown(f"**Emosi:** {EMOTION_MODEL_FILE} (Geometric Features V2 + CNN Features)")
+    st.sidebar.markdown(f"**Etnisitas:** {ETHNICITY_MODEL_FILE} (Geometric Features V1 + CNN Features)")
     st.sidebar.markdown(f"**CNN Embedder:** MobileNetV2 ({CNN_INPUT_SIZE})")
 
 if __name__ == "__main__":
     main()
+
