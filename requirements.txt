@@ -96,5 +96,6 @@ streamlit
 streamlit-webrtc
 requests
 xgboost
+dill
 
 
