@@ -23,8 +23,8 @@ EMOTION_MODEL_URL = "https://drive.google.com/uc?export=download&id=165xIiid5rsR
 ETHNICITY_MODEL_URL = "https://drive.google.com/uc?export=download&id=1URsi1OFfjUIaLI33GI7LSNrLJzygXn63"
 
 # Nama file lokal yang akan disimpan/dimuat
-EMOTION_MODEL_FILE = "model_emosi.joblib"
-ETHNICITY_MODEL_FILE = "model_etnisitas.joblib"
+EMOTION_MODEL_FILE = "modelensembleemosi.joblib"
+ETHNICITY_MODEL_FILE = "modeletnisrf.joblib"
 
 # Label mapping
 EMOTION_LABELS = {0: 'fear', 1: 'surprised', 2: 'angry', 3: 'sad', 4: 'disgusted', 5: 'happy'}
@@ -525,3 +525,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
