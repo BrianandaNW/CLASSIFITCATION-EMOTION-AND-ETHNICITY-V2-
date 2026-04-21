@@ -1,8 +1,7 @@
 streamlit
 streamlit-webrtc
-mediapipe
-opencv-python-headless
-numpy<2.0.0
-requests
-joblib
+mediapipe==0.10.11
+opencv-python-headless==4.8.0.76
+numpy==1.26.4
 scikit-learn
+joblib
