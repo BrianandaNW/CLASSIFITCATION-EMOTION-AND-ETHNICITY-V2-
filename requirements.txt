@@ -1,8 +1,8 @@
-joblib==1.5.2
-mediapipe==0.10.14
-numpy==2.4.4
-opencv_python_headless==4.12.0.88
-Requests==2.33.1
-streamlit==1.51.0
-streamlit_webrtc==0.64.5
+streamlit
+streamlit-webrtc
+mediapipe
+opencv-python-headless
+numpy
+requests
+joblib
 scikit-learn
