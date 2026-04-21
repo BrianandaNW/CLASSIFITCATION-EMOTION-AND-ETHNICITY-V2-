@@ -6,6 +6,7 @@ import cv2
 import mediapipe as mp
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
+from twilio.rest import Client
 
 st.set_page_config(page_title="AI Vision Dashboard", page_icon="👁️", layout="wide")
 # ===================== CONFIG MODEL & LABEL =====================
@@ -444,6 +445,18 @@ class RealTimeClassifier(VideoTransformerBase):
 
 # ===================== MAIN STREAMLIT APP =====================
 
+def get_ice_servers():
+    try:
+        # Mengambil kredensial dari Streamlit Secrets
+        account_sid = st.secrets["TWILIO_ACCOUNT_SID"]
+        auth_token = st.secrets["TWILIO_AUTH_TOKEN"]
+        client = Client(account_sid, auth_token)
+        token = client.tokens.create()
+        return token.ice_servers
+    except Exception as e:
+        # Jika gagal/belum setting secrets, gunakan STUN publik (hanya jalan di lokal/jaringan terbuka)
+        return [{"urls": ["stun:stun.l.google.com:19302"]}]
+        
 def main():
     # --- 1. INJEKSI CSS UNTUK TEMA VISUAL (Modern Dashboard) ---
     st.markdown("""
@@ -491,16 +504,17 @@ def main():
         st.info("💡 **Tips:** Pastikan wajah berada di tengah layar dengan pencahayaan ruangan yang terang dan merata (setara lampu studio) untuk akurasi optimal.")
 
         # Implementasi webrtc_streamer (Tidak ada perubahan logika, hanya penyesuaian resolusi UI)
-        webrtc_streamer(
-            key="realtime-face-classifier",
-            mode=WebRtcMode.SENDRECV,
-            video_transformer_factory=RealTimeClassifier,
-            media_stream_constraints={
-                "video": {"width": 640, "height": 480}, # Resolusi default agar ukuran kotak video konsisten
-                "audio": False
-            },
-            async_transform=True,
-        )
+        # Implementasi webrtc_streamer dengan RTC Configuration
+    webrtc_streamer(
+        key="realtime-face-classifier",
+        mode=WebRtcMode.SENDRECV,
+        rtc_configuration={
+            "iceServers": get_ice_servers() # Ini adalah "jembatan" penembus firewall
+        },
+        video_transformer_factory=RealTimeClassifier,
+        media_stream_constraints={"video": True, "audio": False},
+        async_transform=True,
+    )
 
     with col_info:
         st.markdown("### 📊 Tentang Exprethnic AI")
