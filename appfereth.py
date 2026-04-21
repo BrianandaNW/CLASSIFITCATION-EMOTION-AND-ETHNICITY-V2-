@@ -1,43 +1,26 @@
-# appfereth.py (KODE LENGKAP UNTUK DEPLOYMENT STREAMLIT DENGAN CACHING SEMUA FILE BESAR)
-
-import cv2
-import numpy as np
+import os
+import requests
 import joblib
+import numpy as np
+import cv2
 import mediapipe as mp
-import tensorflow as tf
-from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2, preprocess_input
-from tensorflow.keras.preprocessing.image import img_to_array
 import streamlit as st
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, WebRtcMode
-import logging
-import requests
-import os
 
-# Konfigurasi logger untuk menekan spam TensorFlow
-tf.get_logger().setLevel(logging.ERROR)
-
+st.set_page_config(page_title="AI Vision Dashboard", page_icon="👁️", layout="wide")
 # ===================== CONFIG MODEL & LABEL =====================
 
 # URL Google Drive Model (Pastikan ini adalah tautan Unduhan Langsung)
-EMOTION_MODEL_URL = "https://drive.google.com/uc?export=download&id=165xIiid5rsRIT3n8X5NfTi73B3OL2YhL"
-ETHNICITY_MODEL_URL = "https://drive.google.com/uc?export=download&id=1URsi1OFfjUIaLI33GI7LSNrLJzygXn63"
-
-# URL MobileNetV2 Weights (ImageNet, no_top)
-MOBILE_NET_URL = "https://storage.googleapis.com/tensorflow/keras-applications/mobilenet_v2/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_160_no_top.h5"
+EMOTION_MODEL_URL = "https://drive.google.com/uc?export=download&id=13i05AQb6Q5O-_Rfa_RaiaD9SLaW7OC8_"
+ETHNICITY_MODEL_URL = "https://drive.google.com/uc?export=download&id=1WKBlI6Kt3xiZX4-UfDadPPRegnlVzpWV"
 
 # Nama file lokal yang akan disimpan/dimuat
-EMOTION_MODEL_FILE = "modelensembleemosi.joblib"
-ETHNICITY_MODEL_FILE = "modeletnisrf.joblib"
-MOBILE_NET_FILE = "mobilenet_v2_weights.h5" 
+EMOTION_MODEL_FILE = "emosirfv2smote.joblib"
+ETHNICITY_MODEL_FILE = "etnisrfv2nosmote.joblib"
 
 # Label mapping
 EMOTION_LABELS = {0: 'fear', 1: 'surprised', 2: 'angry', 3: 'sad', 4: 'disgusted', 5: 'happy'}
 ETHNICITY_LABELS = {0: 'Ambon (A)', 1: 'Toraja (T)', 2: 'Kaukasia (K)', 3: 'Jepang (J)'}
-
-# Konfigurasi CNN
-CNN_INPUT_SIZE = (160, 160)
-CNN_POOLING = 'avg'
-CNN_LAYER_TRAINABLE = False
 
 # ===================== FUNGSI CACHING & UNDUHAN MODEL =====================
 
@@ -66,55 +49,20 @@ def load_joblib_model(filename):
     return joblib.load(filename)
 
 
-# ===================== LOAD MODEL & EMBEDDER =====================
-
-class CNNEmbedder:
-    # Menerima path_to_weights sebagai argumen
-    def __init__(self, path_to_weights, input_size=CNN_INPUT_SIZE, pooling=CNN_POOLING, trainable=CNN_LAYER_TRAINABLE):
-        self.input_size = input_size
-        
-        # Muat model dasar MobileNetV2 menggunakan path file lokal
-        base = MobileNetV2(
-            include_top=False, 
-            weights=path_to_weights, # Menggunakan path file lokal
-            input_shape=(input_size[0], input_size[1], 3), 
-            pooling=pooling
-        )
-        
-        base.trainable = trainable
-        self.model = base
-
-    def compute(self, img_bgr):
-        if img_bgr is None or img_bgr.size == 0:
-             return np.zeros((1280,))
-             
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        img_resized = cv2.resize(img_rgb, self.input_size, interpolation=cv2.INTER_AREA)
-        arr = img_to_array(img_resized)
-        arr = np.expand_dims(arr, axis=0)
-        arr = preprocess_input(arr)
-        # Gunakan tf.convert_to_tensor
-        emb = self.model.predict(tf.convert_to_tensor(arr), verbose=0) 
-        return emb.flatten()
+# ===================== LOAD MODEL =====================
 
 try:
-    # 1. Cache weights MobileNetV2 (file H5)
-    weights_path = cache_external_file(MOBILE_NET_URL, MOBILE_NET_FILE, "MobileNetV2 Weights")
+    # Cache dan Muat model Joblib (emosi dan etnisitas)
+    cache_external_file(EMOTION_MODEL_URL, EMOTION_MODEL_FILE, "Model RF Emosi")
+    rf_emotion_model = load_joblib_model(EMOTION_MODEL_FILE) # Diubah menjadi rf_emotion_model
     
-    # 2. Cache dan Muat model Joblib (emosi dan etnisitas)
-    cache_external_file(EMOTION_MODEL_URL, EMOTION_MODEL_FILE, "Model Emosi")
-    en_emotion_model = load_joblib_model(EMOTION_MODEL_FILE)
-    
-    cache_external_file(ETHNICITY_MODEL_URL, ETHNICITY_MODEL_FILE, "Model Etnisitas")
+    cache_external_file(ETHNICITY_MODEL_URL, ETHNICITY_MODEL_FILE, "Model RF Etnisitas")
     rf_ethnicity_model = load_joblib_model(ETHNICITY_MODEL_FILE)
     
-    # 3. Inisialisasi CNNEmbedder menggunakan path weights lokal
-    cnn_embedder = CNNEmbedder(path_to_weights=weights_path)
-
-    st.sidebar.success(f"✅ Semua model dan weights berhasil dimuat.")
+    st.sidebar.success(f"✅ Semua model Random Forest berhasil dimuat.")
 
 except Exception as e:
-    st.error(f"❌ ERROR Fatal: Tidak dapat menyiapkan model untuk klasifikasi. Pastikan Anda telah menambahkan 'dill' dan 'xgboost' ke requirements.txt. Detail: {e}")
+    st.error(f"❌ ERROR Fatal: Tidak dapat menyiapkan model untuk klasifikasi. Detail: {e}")
     st.stop()
 
 
@@ -226,8 +174,7 @@ def extract_class_specific_features(lm):
         mouth_open_ratio
     ])
 
-# FUNGSI UNTUK MODEL EMOSI (GEOMETRI LAMA + TEKSTUR)
-def build_feature_vector_emotion(lm_norm, cnn_emb=None):
+def build_feature_vector_emotion(lm_norm):
     parts = [
         lm_norm.flatten(),
         extract_features_basic(lm_norm),
@@ -235,9 +182,6 @@ def build_feature_vector_emotion(lm_norm, cnn_emb=None):
         extract_features_angles_areas(lm_norm),
         extract_class_specific_features(lm_norm)
     ]
-    if cnn_emb is not None:
-        parts.append(cnn_emb) 
-    
     return np.concatenate(parts)
 
 # --- REPLIKA FUNGSI GEOMETRIS BARU (UNTUK MODEL ETNISITAS) ---
@@ -282,7 +226,7 @@ def calculate_all_features_ethnicity(landmarks):
 
     features = {}
 
-    # 1. EYE FEATURES (menggunakan lm_2d)
+    # 1. EYE FEATURES
     left_ear = _eye_aspect_ratio(lm_2d, FEAT_INDICES['LEFT_EYE'])
     right_ear = _eye_aspect_ratio(lm_2d, FEAT_INDICES['RIGHT_EYE'])
     features['left_ear'] = left_ear
@@ -300,7 +244,7 @@ def calculate_all_features_ethnicity(landmarks):
     right_eye_height = _distance(lm_2d[386], lm_2d[374])
     features['left_eye_height'] = left_eye_height
     features['right_eye_height'] = right_eye_height
-    features['eye_distance'] = _distance(lm_2d[33], lm_2d[263]) # Inter-eye
+    features['eye_distance'] = _distance(lm_2d[33], lm_2d[263])
 
     # 2. EYEBROW FEATURES
     left_brow_height = _distance(lm_2d[70], lm_2d[23])
@@ -385,21 +329,13 @@ def calculate_all_features_ethnicity(landmarks):
 
     return features
 
-# FUNGSI UNTUK MODEL ETNISITAS (GEOMETRI BARU + TEKSTUR)
-def build_feature_vector_ethnicity(lm_raw_mp, cnn_emb=None):
+def build_feature_vector_ethnicity(lm_raw_mp):
     geom_features_dict = calculate_all_features_ethnicity(lm_raw_mp)
-    geom_features_vector = np.array(list(geom_features_dict.values()))
-    
-    parts = [geom_features_vector]
-    
-    if cnn_emb is not None:
-        parts.append(cnn_emb)
-    
-    return np.concatenate(parts)
+    return np.array(list(geom_features_dict.values()))
 
-# ===================== FACE CROP FOR CNN (SHARED) =====================
-def crop_face_from_raw_landmarks(img_bgr, lm_raw, pad=0.2):
-    h, w = img_bgr.shape[:2]
+# ===================== GET BOUNDING BOX FOR VISUALIZATION =====================
+def get_bounding_box(img_shape, lm_raw, pad=0.2):
+    h, w = img_shape[:2]
     xs = (lm_raw[:,0] * w).astype(np.float32)
     ys = (lm_raw[:,1] * h).astype(np.float32)
     x_min, x_max = xs.min(), xs.max()
@@ -411,7 +347,7 @@ def crop_face_from_raw_landmarks(img_bgr, lm_raw, pad=0.2):
     x2 = min(w, int(x_max + x_pad))
     y2 = min(h, int(y_max + y_pad))
     
-    return img_bgr[y1:y2, x1:x2], (x1, y1, x2, y2)
+    return (x1, y1, x2, y2)
 
 
 # ===================== KELAS VIDEO TRANSFORMER UNTUK WEBRTC =====================
@@ -426,19 +362,12 @@ class RealTimeClassifier(VideoTransformerBase):
             min_tracking_confidence=0.5
         )
         # Gunakan model global yang sudah dimuat di awal
-        self.en_emotion_model = en_emotion_model
+        self.rf_emotion_model = rf_emotion_model # Diperbarui ke model RF
         self.rf_ethnicity_model = rf_ethnicity_model
-        self.cnn_embedder = cnn_embedder
         
-    # Fungsi utama yang dipanggil untuk setiap frame
     def transform(self, frame):
-        # Frame dari webrtc_streamer datang sebagai VideoFrame (RGB), diubah menjadi array NumPy BGR untuk OpenCV
         image = frame.to_ndarray(format="bgr24")
-        
-        # Balik gambar secara horizontal
         image = cv2.flip(image, 1)
-        
-        # Konversi ke RGB untuk MediaPipe
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         
         results = self.face_mesh.process(image_rgb)
@@ -452,32 +381,31 @@ class RealTimeClassifier(VideoTransformerBase):
         if results.multi_face_landmarks:
             for face_landmarks in results.multi_face_landmarks:
                 
-                # --- 1. Ekstraksi Landmark Mentah dan Normalisasi ---
+                # --- 1. Ekstraksi Landmark ---
                 lm_raw_mp = np.array([[p.x, p.y, p.z] for p in face_landmarks.landmark])
                 lm_norm = lm_raw_mp.copy()
                 lm_norm = lm_norm - lm_norm.mean(axis=0)
                 lm_norm = lm_norm / (lm_norm.std(axis=0) + 1e-6)
 
-                # --- 2. Crop Wajah untuk CNN Embedding ---
-                cropped_face, bbox_coords = crop_face_from_raw_landmarks(image, lm_raw_mp, pad=0.2)
-                x1, y1, x2, y2 = bbox_coords 
+                # --- 2. Dapatkan Koordinat Bounding Box ---
+                bbox_coords = get_bounding_box(image.shape, lm_raw_mp, pad=0.2)
                 
-                # --- 3. Ekstraksi CNN Embedding (shared) ---
-                cnn_emb = self.cnn_embedder.compute(cropped_face)
-                
-                # --- 4. Buat Vektor Fitur KHUSUS untuk SETIAP MODEL ---
-                feature_vector_emotion = build_feature_vector_emotion(lm_norm, cnn_emb)
+                # --- 3. Vektor Fitur ---
+                feature_vector_emotion = build_feature_vector_emotion(lm_norm)
                 X_live_emo = feature_vector_emotion.reshape(1, -1)
-                feature_vector_ethnicity = build_feature_vector_ethnicity(lm_raw_mp, cnn_emb)
+                
+                feature_vector_ethnicity = build_feature_vector_ethnicity(lm_raw_mp)
                 X_live_eth = feature_vector_ethnicity.reshape(1, -1)
                 
-                # --- 5. Prediksi ---
+                # --- 4. Prediksi & Confidence Score ---
                 try:
-                    emo_proba = self.en_emotion_model.predict_proba(X_live_emo)[0]
+                    # Random Forest Emosi
+                    emo_proba = self.rf_emotion_model.predict_proba(X_live_emo)[0]
                     emo_pred_idx = np.argmax(emo_proba)
                     emo_confidence = emo_proba[emo_pred_idx] * 100
                     emotion_result = EMOTION_LABELS.get(emo_pred_idx, "UNKNOWN EMO")
                     
+                    # Random Forest Etnisitas
                     eth_proba = self.rf_ethnicity_model.predict_proba(X_live_eth)[0]
                     eth_pred_idx = np.argmax(eth_proba)
                     eth_confidence = eth_proba[eth_pred_idx] * 100
@@ -487,7 +415,7 @@ class RealTimeClassifier(VideoTransformerBase):
                     emotion_result = "Prediksi Gagal (No Proba)"
                     ethnicity_result = "Prediksi Gagal (No Proba)"
 
-                # --- 6. Visualisasi (Di dalam loop face_landmarks) ---
+                # --- 5. Visualisasi ---
                 mp_drawing.draw_landmarks(
                     image=image,
                     landmark_list=face_landmarks,
@@ -495,12 +423,11 @@ class RealTimeClassifier(VideoTransformerBase):
                     landmark_drawing_spec=None,
                     connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_tesselation_style())
             
-            # Visualisasi Bounding Box dan Teks (di luar loop face_landmarks)
+            # Teks dan Bounding Box
             if bbox_coords is not None:
                 x1, y1, x2, y2 = bbox_coords
                 cv2.rectangle(image, (x1, y1), (x2, y2), (255, 0, 0), 2)
                 
-                # Tampilkan hasil dengan confidence
                 text_emo = f"Emotion: {emotion_result} ({emo_confidence:.2f}%)"
                 text_eth = f"Ethnicity: {ethnicity_result} ({eth_confidence:.2f}%)"
                 
@@ -512,34 +439,121 @@ class RealTimeClassifier(VideoTransformerBase):
                 cv2.putText(image, text_eth, (x1 + 5, y1 - 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
 
-        # Kembalikan frame yang sudah dimodifikasi (BGR)
         return image.copy()
 
 
 # ===================== MAIN STREAMLIT APP =====================
 
 def main():
-    st.title("Klasifikasi Emosi & Etnisitas Wajah Real-Time")
+    # --- 1. INJEKSI CSS UNTUK TEMA VISUAL (Modern Dashboard) ---
     st.markdown("""
-    Deploy Model Machine Learning Berbasis Web ini menggunakan model ML (Random Forest, Support Vector Machine, XGBoost, Ensemble Voting Classifier) 
-    yang dikombinasikan dengan **Raw Landmarks &Geometric Features (MediaPipe FaceMesh)** dan **Texture/CCN Feature Embedder (MobileNetV2)** untuk klasifikasi Emosi dan Etnisitas secara bersamaan.
-    """)
-    st.warning("⚠️ **PENTING:** Pastikan Anda memberikan izin akses kamera saat diminta oleh browser.")
+    <style>
+        /* Tipografi Judul Utama */
+        .main-title {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-size: 2.8rem;
+            font-weight: 800;
+            background: -webkit-linear-gradient(45deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-align: center;
+            margin-bottom: 0px;
+            padding-bottom: 10px;
+        }
+        /* Tipografi Sub-judul */
+        .sub-title {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-size: 1.1rem;
+            color: #64748b;
+            text-align: center;
+            margin-top: 0px;
+            margin-bottom: 35px;
+        }
+        /* Memperhalus tampilan warning/info box */
+        .stAlert {
+            border-radius: 10px;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
-    # Implementasi webrtc_streamer
-    webrtc_streamer(
-        key="realtime-face-classifier",
-        mode=WebRtcMode.SENDRECV,
-        video_transformer_factory=RealTimeClassifier,
-        media_stream_constraints={"video": True, "audio": False},
-        async_transform=True,
-    )
+    # --- 2. HEADER SECTION ---
+    st.markdown('<div class="main-title">ExprEthnic AI Dashboard</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Sistem Klasifikasi Emosi & Etnisitas Berbasis Geometric Feature (From Facial Landmarks)</div>', unsafe_allow_html=True)
 
-    st.sidebar.header("Detail Model")
-    st.sidebar.markdown(f"**Emosi:** {EMOTION_MODEL_FILE} (Geometric Features V2 + CNN Features)")
-    st.sidebar.markdown(f"**Etnisitas:** {ETHNICITY_MODEL_FILE} (Geometric Features V1 + CNN Features)")
-    st.sidebar.markdown(f"**CNN Embedder:** MobileNetV2 ({CNN_INPUT_SIZE})")
+    # --- 3. LAYOUT GRID (Kiri: Kamera, Kanan: Panel Informasi) ---
+    # Membagi layar menjadi 2 kolom (Rasio 1.5 : 1)
+    col_video, col_info = st.columns([1.5, 1], gap="large")
+
+    with col_video:
+        st.markdown("### 📷 Live Camera Feed ")
+        
+        # Pesan arahan untuk pengguna
+        st.info("💡 **Tips:** Pastikan wajah berada di tengah layar dengan pencahayaan ruangan yang terang dan merata (setara lampu studio) untuk akurasi optimal.")
+
+        # Implementasi webrtc_streamer (Tidak ada perubahan logika, hanya penyesuaian resolusi UI)
+        webrtc_streamer(
+            key="realtime-face-classifier",
+            mode=WebRtcMode.SENDRECV,
+            video_transformer_factory=RealTimeClassifier,
+            media_stream_constraints={
+                "video": {"width": 640, "height": 480}, # Resolusi default agar ukuran kotak video konsisten
+                "audio": False
+            },
+            async_transform=True,
+        )
+
+    with col_info:
+        st.markdown("### 📊 Tentang Exprethnic AI")
+        
+        # Placeholder Teks (Silakan Anda ganti dengan narasi/teori Anda sendiri nanti)
+        st.write("""
+        Exprethnic AI adalah sistem yang dapat mendeteksi wajah secara langsung melalui
+        kamera dan mengenali ekspresi serta etnisitas. Sistem ini bekerja 
+        dengan membaca landmarks pada wajah dan mengubahnya menjadi vektor data yang kemudian 
+        diproses menggunakan algoritma pembelajaran mesin untuk menghasilkan prediksi.
+        """)
+
+        st.markdown("---")
+
+        # Menggunakan Expander agar UI terlihat seperti 'Card' yang rapi
+        with st.expander("✨ Metodologi & Ekstraksi Fitur", expanded=True):
+            st.markdown("""
+            **Bagaimana cara kerjanya?**
+            * **MediaPipe FaceMesh:** Memetakan 468 titik 3D pada wajah (*Raw Landmarks*).
+            * **Fitur Geometris:** Menghitung jarak antar mata, rasio kelengkungan bibir, hingga asimetri wajah.
+            * **Random Forest:** Mengklasifikasikan vektor data tersebut ke dalam label emosi dan etnis secara instan.
+            """)
+
+        with st.expander("⚙️ Panduan Penggunaan"):
+            st.markdown("""
+            1.  Berikan izin akses kamera (*Allow Camera*) pada *pop-up browser*.
+            2.  Tekan tombol **START** di bawah *frame* kamera sebelah kiri.
+            3.  Tunggu beberapa detik hingga koneksi WebRTC stabil.
+            4.  Teks klasifikasi akan muncul di atas *bounding box* wajah Anda.
+            """)
+
+    # --- 4. SIDEBAR (Panel Kontrol & Backend Info) ---
+    with st.sidebar:
+        # Gambar ilustrasi di sidebar (Bisa diganti URL logonya nanti)
+        st.image("https://cdn-icons-png.flaticon.com/512/2083/2083213.png", width=100) 
+        
+        st.markdown("## 🛠️ Control Panel")
+        st.write("Status Deployment Dan Konfigurasi Sistem.")
+
+        st.divider()
+
+        st.markdown("### 🧠 Model Status (Active)")
+        # Indikator hijau untuk menandakan model berhasil dimuat
+        st.success(f"**Emotion Module (Random Forest)**\n\n`{EMOTION_MODEL_FILE}`")
+        st.success(f"**Ethnicity Module (Random Forest)**\n\n`{ETHNICITY_MODEL_FILE}`")
+
+    # --- 5. FOOTER ---
+    st.markdown("---")
+    st.markdown("""
+    <div style='text-align: center; color: #94a3b8; font-size: 0.9rem; margin-top: 20px;'>
+        &copy; 2026 | Dibangun menggunakan Python, OpenCV & Streamlit
+    </div>
+    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
-
