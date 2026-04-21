@@ -68,9 +68,9 @@ except Exception as e:
 
 # ===================== MEDIA PIPE & UTILITY FUNCTIONS =====================
 
-mp_face = mp.solutions.face_mesh
-mp_drawing = mp.solutions.drawing_utils
-mp_drawing_styles = mp.solutions.drawing_styles
+from mediapipe.python.solutions import face_mesh as mp_face
+from mediapipe.python.solutions import drawing_utils as mp_drawing
+from mediapipe.python.solutions import drawing_styles as mp_drawing_styles
 
 # --- REPLIKA UTAMA FUNGSI GEOMETRIS LAMA (UNTUK MODEL EMOSI) ---
 
